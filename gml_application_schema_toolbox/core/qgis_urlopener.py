@@ -16,11 +16,12 @@
 #   License along with this library; if not, see <http://www.gnu.org/licenses/>.
 
 from builtins import str
+from urllib.parse import urlparse, parse_qsl, urlunparse, urlencode
 
 from qgis.PyQt.QtCore import QUrl, QEventLoop
 from qgis.PyQt.QtNetwork import QNetworkRequest, QNetworkAccessManager
 from io import BytesIO
-from qgis.core import QgsNetworkAccessManager
+from qgis.core import QgsNetworkAccessManager, QgsApplication
 
 from gml_application_schema_toolbox.core.settings import settings
 from gml_application_schema_toolbox import name as plugin_name
@@ -34,6 +35,37 @@ def _sync_get(url):
         __network_manager.setProxy(QgsNetworkAccessManager.instance().proxy())
     pause = QEventLoop()
     req = QNetworkRequest(url)
+
+    authcfg = None
+    url_str = url.url()
+    if 'authcfg' in url_str.lower():
+        # Grab authcfg, then strip it from URL
+        url_p = urlparse(url_str)
+        url_query = url_p.query.strip()
+        params = parse_qsl(url_query, keep_blank_values=True)
+        clean_params = []
+        for k, v in params:
+            if k.lower() == 'authcfg':
+                authcfg = v
+                continue
+            clean_params.append((k, v))
+        url_new_p = list(url_p)
+        url_new_p[4] = urlencode(clean_params, doseq=True) \
+            if clean_params else ''
+        clean_url = urlunparse(url_new_p)
+        url.setUrl(clean_url)
+
+    if authcfg:  # avoid empty string value
+        QgsApplication.instance().authManager().updateNetworkRequest(
+            req, authcfg=authcfg)
+
+    if req.url().scheme().lower() == 'https':
+        # Merge in QGIS trusted CAs
+        ssl_conf = req.sslConfiguration()
+        ssl_conf.setCaCertificates(
+            QgsApplication.instance().authManager().trustedCaCertsCache())
+        req.setSslConfiguration(ssl_conf)
+
     req.setRawHeader(b"Accept", b"application/xml")
     req.setRawHeader(b"Accept-Language", bytes(settings.value("default_language", "fr"), "utf8"))
     req.setRawHeader(b"User-Agent", bytes(settings.value('http_user_agent', plugin_name()), "utf8"))

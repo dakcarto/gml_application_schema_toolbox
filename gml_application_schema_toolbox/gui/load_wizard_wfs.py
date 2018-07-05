@@ -81,17 +81,23 @@ class LoadWizardWFS(QWizardPage, PAGE_1A_W):
         uri = conn.uri().param('url')
         req_version = conn.uri().param('version')
         s = QgsSettings()
+
+        authcfg = s.value("qgis/WFS/{}/authcfg".format(name), False)
+        if authcfg and 'authcfg=' not in uri.lower():
+            uri += '{0}authcfg={1}'.format('&' if '?' in uri else '?', authcfg)
+
         checked_version = s.value("qgis/connections-wfs/{}/checked_version".format(name), False)
         if req_version == "auto" or not checked_version:
             # detect version
-            u = QUrlQuery()
+            final_url = QUrl(uri)
+            u = QUrlQuery(final_url.query()) if final_url.hasQuery() \
+                else QUrlQuery()
             u.addQueryItem("request", "GetCapabilities")
             u.addQueryItem("service", "WFS")
             if req_version == "auto":
                 u.addQueryItem("acceptversions", "2.0.0,1.1.0,1.0.0")
             elif not checked_version:
                 u.addQueryItem("version", req_version)
-            final_url = QUrl(uri)
             final_url.setQuery(u)
 
             xml, ns_map = xml_parse(remote_open_from_qgis(final_url.toString()))
